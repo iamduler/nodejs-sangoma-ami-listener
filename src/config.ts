@@ -25,6 +25,9 @@ export interface Config {
   };
   logging: {
     level: string;
+    fileEnabled: boolean;
+    fileDirectory: string;
+    retentionDays: number;
   };
 }
 
@@ -79,5 +82,8 @@ export const config: Config = {
   },
   logging: {
     level: getEnvVar('LOG_LEVEL', 'info'),
+    fileEnabled: getEnvBoolean('LOG_FILE_ENABLED', true),
+    fileDirectory: getEnvVar('LOG_FILE_DIRECTORY', './logs'),
+    retentionDays: getEnvNumber('LOG_RETENTION_DAYS', 90),
   },
 };

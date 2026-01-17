@@ -15,6 +15,16 @@ async function startServer(): Promise<void> {
   const app = express();
   app.use(express.json());
 
+  app.set('trust proxy', true);
+
+  app.get('/', (_req: Request, res: Response) => {
+    res.json({
+      message: 'API lấy dữ liệu từ AMI của Sangoma PBX/FreePBX và gửi webhook đến CRM',
+      version: '1.0.0',
+      author: 'Duler@CloudGo',
+    });
+  });
+
   // Health check endpoint
   app.get('/health', (_req: Request, res: Response) => {
     res.json({

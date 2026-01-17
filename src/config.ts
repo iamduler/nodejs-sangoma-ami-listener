@@ -1,6 +1,9 @@
 import * as dotenv from 'dotenv';
+import * as path from 'path';
 
-dotenv.config();
+// Load .env file from project root
+const envPath = path.resolve(process.cwd(), '.env');
+dotenv.config({ path: envPath });
 
 export interface Config {
   ami: {

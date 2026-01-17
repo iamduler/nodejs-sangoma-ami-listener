@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { config } from './config';
+import { formatLocalTimestamp } from './utils';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -143,7 +144,7 @@ class Logger {
     }
 
     const entry: LogEntry = {
-      timestamp: new Date().toISOString(),
+      timestamp: formatLocalTimestamp(),
       level,
       message,
       ...meta,

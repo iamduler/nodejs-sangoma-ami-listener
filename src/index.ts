@@ -2,6 +2,7 @@ import express, { Request, Response } from 'express';
 import { config } from './config';
 import { logger } from './logger';
 import { amiListener } from './ami';
+import { formatLocalTimestamp } from './utils';
 
 let server: any = null;
 let isShuttingDown = false;
@@ -21,7 +22,7 @@ async function startServer(): Promise<void> {
     res.json({
       message: 'API lấy dữ liệu từ AMI của Sangoma PBX/FreePBX và gửi webhook đến CRM',
       version: '1.0.0',
-      author: 'Duler@CloudGo',
+      author: 'Duler@CloudGO',
     });
   });
 
@@ -29,7 +30,7 @@ async function startServer(): Promise<void> {
   app.get('/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
-      timestamp: new Date().toISOString(),
+      timestamp: formatLocalTimestamp(),
       uptime: process.uptime(),
     });
   });
@@ -44,7 +45,7 @@ async function startServer(): Promise<void> {
     } else {
       res.json({
         status: 'ready',
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
       });
     }
   });

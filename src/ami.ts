@@ -2,6 +2,7 @@ import { createClient } from 'ami-io';
 import { config } from './config';
 import { logger } from './logger';
 import { webhookSender, WebhookPayload } from './webhook';
+import { formatLocalTimestamp } from './utils';
 
 interface CallState {
   uniqueid: string;
@@ -182,7 +183,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.start',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           callerIdNum: callState.callerIdNum,
@@ -216,7 +217,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.ringing',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           destination,
@@ -253,7 +254,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.answered',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           bridgeUniqueid,
@@ -295,7 +296,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.recording_started',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           file,
@@ -331,7 +332,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.recording_stopped',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           file,
@@ -364,7 +365,7 @@ export class AMIListener {
       const payload: WebhookPayload = {
         event: 'call.ended',
         uniqueid,
-        timestamp: new Date().toISOString(),
+        timestamp: formatLocalTimestamp(),
         data: {
           channel,
           cause,

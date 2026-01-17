@@ -1,4 +1,4 @@
-import { createClient, Client } from 'ami-io';
+import { createClient } from 'ami-io';
 import { config } from './config';
 import { logger } from './logger';
 import { webhookSender, WebhookPayload } from './webhook';
@@ -21,13 +21,13 @@ interface CallState {
 }
 
 export class AMIListener {
-  private client: Client | null = null;
+  private client: any | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
   private isShuttingDown: boolean = false;
   private callStates: Map<string, CallState> = new Map();
 
-  private createClient(): Client {
+  private createClient(): any {
     return createClient({
       host: config.ami.host,
       port: config.ami.port,

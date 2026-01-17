@@ -16,7 +16,7 @@ async function startServer(): Promise<void> {
   app.use(express.json());
 
   // Health check endpoint
-  app.get('/health', (req: Request, res: Response) => {
+  app.get('/health', (_req: Request, res: Response) => {
     res.json({
       status: 'ok',
       timestamp: new Date().toISOString(),
@@ -25,7 +25,7 @@ async function startServer(): Promise<void> {
   });
 
   // Readiness check endpoint
-  app.get('/ready', (req: Request, res: Response) => {
+  app.get('/ready', (_req: Request, res: Response) => {
     if (isShuttingDown) {
       res.status(503).json({
         status: 'not ready',

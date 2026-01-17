@@ -132,9 +132,9 @@ export class AMIListener {
       const eventName = event.event || event.Event;
       
       switch (eventName) {
-        case 'Newchannel':
-          this.handleNewchannel(event);
-          break;
+        // case 'Newchannel':
+        //   this.handleNewchannel(event);
+        //   break;
         case 'DialBegin':
           this.handleDialBegin(event);
           break;
@@ -184,14 +184,6 @@ export class AMIListener {
         event: 'call.start',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          callerIdNum: callState.callerIdNum,
-          callerIdName: callState.callerIdName,
-          context: callState.context,
-          extension: callState.extension,
-          state: callState.state,
-        },
         rawData: event,
       };
 
@@ -219,12 +211,6 @@ export class AMIListener {
         event: 'call.ringing',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          destination,
-          callerIdNum: event.CallerIDNum || event.calleridnum,
-          callerIdName: event.CallerIDName || event.calleridname,
-        },
         rawData: event,
       };
 
@@ -257,14 +243,6 @@ export class AMIListener {
         event: 'call.answered',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          bridgeUniqueid,
-          callerIdNum: event.CallerIDNum || event.calleridnum,
-          callerIdName: event.CallerIDName || event.calleridname,
-          connectedLineNum: event.ConnectedLineNum || event.connectedlinenum,
-          connectedLineName: event.ConnectedLineName || event.connectedlinename,
-        },
         rawData: event,
       };
 
@@ -300,10 +278,6 @@ export class AMIListener {
         event: 'call.recording_started',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          file,
-        },
         rawData: event,
       };
 
@@ -337,10 +311,6 @@ export class AMIListener {
         event: 'call.recording_stopped',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          file,
-        },
         rawData: event,
       };
 
@@ -363,23 +333,12 @@ export class AMIListener {
         return;
       }
 
-      const callState = this.callStates.get(uniqueid);
-
       logger.debug('Hangup event received', { uniqueid, channel, cause, causeTxt });
 
       const payload: WebhookPayload = {
         event: 'call.ended',
         uniqueid,
         timestamp: formatLocalTimestamp(),
-        data: {
-          channel,
-          cause,
-          causeTxt,
-          duration: event.Duration || event.duration,
-          callerIdNum: callState?.callerIdNum || event.CallerIDNum || event.calleridnum,
-          callerIdName: callState?.callerIdName || event.CallerIDName || event.calleridname,
-          recording: callState?.recording,
-        },
         rawData: event,
       };
 

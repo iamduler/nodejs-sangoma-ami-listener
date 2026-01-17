@@ -5,7 +5,6 @@ export interface WebhookPayload {
   event: string;
   uniqueid: string;
   timestamp: string;
-  data: Record<string, any>;
   rawData: Record<string, any>;
 }
 

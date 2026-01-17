@@ -192,6 +192,7 @@ export class AMIListener {
           extension: callState.extension,
           state: callState.state,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {
@@ -224,6 +225,7 @@ export class AMIListener {
           callerIdNum: event.CallerIDNum || event.calleridnum,
           callerIdName: event.CallerIDName || event.calleridname,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {
@@ -263,6 +265,7 @@ export class AMIListener {
           connectedLineNum: event.ConnectedLineNum || event.connectedlinenum,
           connectedLineName: event.ConnectedLineName || event.connectedlinename,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {
@@ -301,6 +304,7 @@ export class AMIListener {
           channel,
           file,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {
@@ -337,6 +341,7 @@ export class AMIListener {
           channel,
           file,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {
@@ -375,6 +380,7 @@ export class AMIListener {
           callerIdName: callState?.callerIdName || event.CallerIDName || event.calleridname,
           recording: callState?.recording,
         },
+        rawData: event,
       };
 
       webhookSender.send(payload).catch((error) => {

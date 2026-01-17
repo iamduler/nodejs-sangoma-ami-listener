@@ -6,6 +6,7 @@ export interface WebhookPayload {
   uniqueid: string;
   timestamp: string;
   data: Record<string, any>;
+  rawData: Record<string, any>;
 }
 
 interface RetryState {

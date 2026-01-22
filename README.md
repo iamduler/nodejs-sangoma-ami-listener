@@ -79,6 +79,7 @@ WEBHOOK_RETRY_MULTIPLIER=2      # Exponential backoff multiplier (default: 2)
 ```env
 SERVER_ENABLED=true             # Enable HTTP server for health checks
 SERVER_PORT=3000                # HTTP server port (default: 3000)
+API_TOKEN=your-secret-token-here # API token for click2call authentication
 ```
 
 ### Logging
@@ -305,6 +306,80 @@ Returns service readiness status (useful for Kubernetes liveness/readiness probe
   "timestamp": "2024-01-15T10:30:00.000+07:00"
 }
 ```
+
+### POST /api/click2call
+Initiates a click2call session. Requires authentication via Bearer token.
+
+**Authentication:**
+- Header: `Authorization: Bearer <API_TOKEN>`
+- Token must match the `API_TOKEN` configured in environment variables
+
+**Request Body:**
+```json
+{
+  "extension": "1001",
+  "phoneNumber": "0123456789"
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "success": true,
+  "message": "Call initiated successfully",
+  "data": {
+    "extension": "1001",
+    "phoneNumber": "0123456789",
+    "actionId": "1234567890.123"
+  }
+}
+```
+
+**Error Responses:**
+
+*401 Unauthorized* - Missing or invalid token:
+```json
+{
+  "success": false,
+  "error": "Authentication token required",
+  "message": "Please provide a valid API token in Authorization header"
+}
+```
+
+*400 Bad Request* - Missing or invalid parameters:
+```json
+{
+  "success": false,
+  "error": "Missing parameter",
+  "message": "Extension is required"
+}
+```
+
+*500 Internal Server Error* - Call initiation failed:
+```json
+{
+  "success": false,
+  "error": "Call initiation failed",
+  "message": "Failed to initiate call"
+}
+```
+
+**Example cURL Request:**
+```bash
+curl -X POST http://localhost:3000/api/click2call \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-secret-token-here" \
+  -d '{
+    "extension": "1001",
+    "phoneNumber": "0123456789"
+  }'
+```
+
+**Notes:**
+- The extension must be numeric
+- Phone number can include international format (with + prefix)
+- The service will first call the extension, then when answered, dial the phone number
+- The call is initiated asynchronously and will not block the API response
 
 ## Logging
 

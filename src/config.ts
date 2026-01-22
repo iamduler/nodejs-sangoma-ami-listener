@@ -25,6 +25,7 @@ export interface Config {
   server: {
     port: number;
     enabled: boolean;
+    apiToken: string;
   };
   logging: {
     level: string;
@@ -82,6 +83,7 @@ export const config: Config = {
   server: {
     port: getEnvNumber('SERVER_PORT', 3000),
     enabled: getEnvBoolean('SERVER_ENABLED', true),
+    apiToken: getEnvVar('API_TOKEN'),
   },
   logging: {
     level: getEnvVar('LOG_LEVEL', 'info'),

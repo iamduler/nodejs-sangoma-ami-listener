@@ -207,6 +207,113 @@ export class AMIListener {
     await this.connect();
   }
 
+  /**
+   * Execute click2call: originate a call from extension to phone number
+   * @param extension - Extension number to call from
+   * @param phoneNumber - Phone number to call to
+   * @returns Promise with result of the originate action
+   */
+  async click2call(extension: string, phoneNumber: string): Promise<{ success: boolean; message: string; actionId?: string }> {
+    if (!this.client) {
+      return {
+        success: false,
+        message: 'AMI client is not connected',
+      };
+    }
+
+    try {
+      // Validate inputs
+      if (!extension || !phoneNumber) {
+        return {
+          success: false,
+          message: 'Extension and phone number are required',
+        };
+      }
+
+      // Clean phone number (remove spaces, dashes, etc.)
+      const cleanPhoneNumber = phoneNumber.replace(/[\s\-\(\)]/g, '');
+
+      // Build originate action
+      // Format: Local/{extension}@from-internal/n -> {phoneNumber}@from-internal
+      // This will first call the extension, then when answered, dial the phone number
+      const channel = `Local/${extension}@from-internal/n`;
+      const context = 'from-internal';
+      const exten = phoneNumber;
+      const priority = 1;
+      const timeout = 30000; // 30 seconds timeout
+
+      logger.info('Initiating click2call', {
+        extension,
+        phoneNumber: cleanPhoneNumber,
+        channel,
+      });
+
+      // Send Originate action via AMI
+      const action = {
+        Action: 'Originate',
+        Channel: channel,
+        Context: context,
+        Exten: exten,
+        Priority: priority.toString(),
+        Timeout: timeout.toString(),
+        Async: 'true', // Make it async so it doesn't block
+      };
+
+      const response = await new Promise<any>((resolve, reject) => {
+        this.client.action(action, (err: any, res: any) => {
+          if (err) {
+            reject(err);
+          } else {
+            resolve(res);
+          }
+        });
+      });
+
+      if (response.Response === 'Success') {
+        logger.info('Click2call initiated successfully', {
+          extension,
+          phoneNumber: cleanPhoneNumber,
+          actionId: response.ActionID,
+        });
+
+        return {
+          success: true,
+          message: 'Call initiated successfully',
+          actionId: response.ActionID,
+        };
+      } else {
+        logger.error('Click2call failed', {
+          extension,
+          phoneNumber: cleanPhoneNumber,
+          response: response.Message || response,
+        });
+
+        return {
+          success: false,
+          message: response.Message || 'Failed to initiate call',
+        };
+      }
+    } catch (error: any) {
+      logger.error('Error initiating click2call', {
+        error: error.message,
+        extension,
+        phoneNumber,
+      });
+
+      return {
+        success: false,
+        message: error.message || 'Unknown error occurred',
+      };
+    }
+  }
+
+  /**
+   * Get AMI client instance (for external use)
+   */
+  getClient(): any | null {
+    return this.client;
+  }
+
   async stop(): Promise<void> {
     logger.info('Stopping AMI Listener');
     this.isShuttingDown = true;

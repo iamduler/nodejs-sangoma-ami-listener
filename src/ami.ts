@@ -16,13 +16,37 @@ export class AMIListener {
    */
   private shouldProcessEvent(event: any): boolean {
     const channel = event.Channel || event.channel;
-    if (!channel) {
-      return false;
-    }
+    const uniqueid = event.Uniqueid || event.uniqueid;
+    
+    if (!channel) return false;
+
     // Skip events with channel starting with "Local/" or "Macro/"
     if (channel.startsWith('Local/') || channel.startsWith('Macro/')) {
+      logger.debug(`Skipping event by channel (Local/Macro channel)`, { uniqueid, channel });
       return false;
     }
+    
+    if (event.event == 'DialBegin') {
+      const destChannel = event.DestChannel || event.destchannel;
+
+      // Skip events with destchannel starting with "Local/" or "Macro/"
+      if (destChannel.startsWith('Local/') || destChannel.startsWith('Macro/')) {
+        logger.debug(`Skipping DialBegin event by destination channel (Local/Macro channel)`, { uniqueid, channel, destChannel });
+        return false;
+      }
+    }
+    else {
+      if (event.exten === 's') {
+        logger.debug(`Skipping event by extension (start extension)`, { uniqueid, channel, exten: event.exten });
+        return false;
+      }
+      
+      if (event.exten === 'h') {
+        logger.debug(`Skipping event by extension (hangup extension)`, { uniqueid, channel, exten: event.exten });
+        return false;
+      }
+    }
+
     return true;
   }
 
@@ -145,8 +169,8 @@ export class AMIListener {
     this.client.on('event', (event: any) => {
       const eventName = event.event || event.Event;
       
-      // Ignore events: Newchannel
-      const validEvents = ['DialBegin', 'BridgeEnter', 'MixMonitorStart', 'MixMonitorStop', 'Hangup'];
+      // Ignore events: Newchannel, MixMonitorStart, MixMonitorStop (not supported)
+      const validEvents = ['DialBegin', 'BridgeEnter', 'Hangup'];
 
       if (!validEvents.includes(eventName)) {
         return;
@@ -155,19 +179,16 @@ export class AMIListener {
       try {
         const uniqueid = event.Uniqueid || event.uniqueid;
         const channel = event.Channel || event.channel;
-        const destination = event.Destination || event.destination;
   
         if (!uniqueid || !channel) {
           return;
         }
   
-        // Filter out events with channel starting with "Local/" or "Macro/"
         if (!this.shouldProcessEvent(event)) {
-          logger.debug(`Skipping ${eventName} event (Local/Macro channel)`, { uniqueid, channel });
           return;
         }
   
-        logger.debug(`${eventName} event received`, { uniqueid, channel, destination });
+        logger.debug(`${eventName} event received`, { uniqueid, channel });
   
         const payload: WebhookPayload = this.sanitizeEvent(event);
   

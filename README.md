@@ -5,10 +5,13 @@ Production-ready Node.js TypeScript service for listening to Asterisk AMI (Aster
 ## Features
 
 - ✅ **AMI Connection**: Connects to Asterisk AMI over TCP with auto-reconnect
-- ✅ **Event Listening**: Monitors key call events (DialBegin, BridgeEnter, Hangup, MixMonitorStart, MixMonitorStop)
+- ✅ **Event Listening**: Monitors key call events (DialBegin, BridgeEnter, Hangup)
 - ✅ **Raw Event Forwarding**: Forwards original AMI event format to webhook endpoint (no normalization)
-- ✅ **Event Filtering**: Automatically filters out events with channels starting with "Local/" or "Macro/"
-- ✅ **Data Sanitization**: Automatically removes `incomingData` field from events before sending
+- ✅ **Event Filtering**: Automatically filters out events with:
+  - Channels starting with "Local/" or "Macro/"
+  - Destination channels (for DialBegin) starting with "Local/" or "Macro/"
+  - Extensions 's' (start) or 'h' (hangup)
+- ✅ **Data Sanitization**: Automatically removes `incomingData` field and adds `timestamp` to events before sending
 - ✅ **Webhook Delivery**: POST webhooks with exponential backoff retry mechanism
 - ✅ **Idempotency**: Prevents duplicate webhook deliveries using uniqueid
 - ✅ **Local Timezone**: All timestamps use Asia/Ho_Chi_Minh timezone (UTC+7)
@@ -165,15 +168,25 @@ The service listens to AMI events and forwards them directly to webhook endpoint
 |-----------|-------------|
 | DialBegin | Call is ringing |
 | BridgeEnter | Call answered (bridged) |
-| MixMonitorStart | Call recording started |
-| MixMonitorStop | Call recording stopped |
 | Hangup | Call ended |
 
 ### Event Filtering
 
-- **Channel Filtering**: Events with channels starting with `Local/` or `Macro/` are automatically skipped
-- **Data Sanitization**: The `incomingData` field is automatically removed from all events before sending
-- **Raw Format**: Events are forwarded in their original AMI format (no normalization)
+The service automatically filters out events based on the following criteria:
+
+1. **Channel Filtering**: 
+   - Events with channels starting with `Local/` or `Macro/` are skipped
+   - For `DialBegin` events: destination channels starting with `Local/` or `Macro/` are also skipped
+
+2. **Extension Filtering**:
+   - Events with extension `s` (start extension) are skipped
+   - Events with extension `h` (hangup extension) are skipped
+
+3. **Data Sanitization**: 
+   - The `incomingData` field is automatically removed from all events
+   - A `timestamp` field (Asia/Ho_Chi_Minh timezone, UTC+7) is automatically added to each event
+
+4. **Raw Format**: Events are forwarded in their original AMI format (no normalization)
 
 ## Webhook Payload Format
 
@@ -200,8 +213,9 @@ All webhooks are sent as POST requests with the original AMI event format. The s
 
 **Note**: 
 - The `incomingData` field is automatically removed from all events
-- Timestamps in logs use Asia/Ho_Chi_Minh timezone (UTC+7) format: `2024-01-15T10:30:00.000+07:00`
+- A `timestamp` field is automatically added to each event in Asia/Ho_Chi_Minh timezone (UTC+7) format: `2024-01-15T10:30:00.000+07:00`
 - Events are forwarded in their original AMI format (no normalization)
+- Only `DialBegin`, `BridgeEnter`, and `Hangup` events are processed
 
 ### Event Examples
 
@@ -218,8 +232,10 @@ Triggered when a call starts ringing.
   "CallerIDName": "John Doe",
   "Uniqueid": "1234567890.123",
   "Destination": "SIP/1002-00000002",
+  "DestChannel": "SIP/1002-00000002",
   "Context": "from-internal",
-  "Exten": "1002"
+  "Exten": "1002",
+  "timestamp": "2024-01-15T10:30:01.000+07:00"
 }
 ```
 
@@ -235,31 +251,8 @@ Triggered when a call is answered (bridged).
   "CallerIDName": "John Doe",
   "ConnectedLineNum": "1002",
   "ConnectedLineName": "Jane Doe",
-  "Uniqueid": "1234567890.123"
-}
-```
-
-#### `MixMonitorStart`
-Triggered when call recording starts.
-```json
-{
-  "Event": "MixMonitorStart",
-  "Privilege": "call,all",
-  "Channel": "SIP/1001-00000001",
   "Uniqueid": "1234567890.123",
-  "File": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
-}
-```
-
-#### `MixMonitorStop`
-Triggered when call recording stops.
-```json
-{
-  "Event": "MixMonitorStop",
-  "Privilege": "call,all",
-  "Channel": "SIP/1001-00000001",
-  "Uniqueid": "1234567890.123",
-  "File": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
+  "timestamp": "2024-01-15T10:30:05.000+07:00"
 }
 ```
 
@@ -275,14 +268,19 @@ Triggered when a call ends.
   "CauseTxt": "Normal Clearing",
   "Duration": "330",
   "CallerIDNum": "1001",
-  "CallerIDName": "John Doe"
+  "CallerIDName": "John Doe",
+  "timestamp": "2024-01-15T10:35:30.000+07:00"
 }
 ```
 
 **Important Notes:**
 - All events are forwarded in their **original AMI format** (no normalization)
 - The `incomingData` field is **automatically removed** from all events
+- A `timestamp` field is **automatically added** to each event (Asia/Ho_Chi_Minh timezone, UTC+7)
 - Events with channels starting with `Local/` or `Macro/` are **automatically filtered out**
+- For `DialBegin` events, destination channels starting with `Local/` or `Macro/` are also filtered out
+- Events with extension `s` (start) or `h` (hangup) are **automatically filtered out**
+- Only `DialBegin`, `BridgeEnter`, and `Hangup` events are processed (MixMonitorStart and MixMonitorStop are not supported)
 - Timestamps in application logs use **Asia/Ho_Chi_Minh timezone (UTC+7)**
 
 ## Health Check Endpoints

@@ -5,10 +5,13 @@ Production-ready Node.js TypeScript service for listening to Asterisk AMI (Aster
 ## Features
 
 - ✅ **AMI Connection**: Connects to Asterisk AMI over TCP with auto-reconnect
-- ✅ **Event Listening**: Monitors key call events (Newchannel, DialBegin, BridgeEnter, Hangup, MixMonitorStart, MixMonitorStop)
-- ✅ **Event Normalization**: Converts AMI events to standardized CRM webhook payloads
+- ✅ **Event Listening**: Monitors key call events (DialBegin, BridgeEnter, Hangup, MixMonitorStart, MixMonitorStop)
+- ✅ **Raw Event Forwarding**: Forwards original AMI event format to webhook endpoint (no normalization)
+- ✅ **Event Filtering**: Automatically filters out events with channels starting with "Local/" or "Macro/"
+- ✅ **Data Sanitization**: Automatically removes `incomingData` field from events before sending
 - ✅ **Webhook Delivery**: POST webhooks with exponential backoff retry mechanism
 - ✅ **Idempotency**: Prevents duplicate webhook deliveries using uniqueid
+- ✅ **Local Timezone**: All timestamps use Asia/Ho_Chi_Minh timezone (UTC+7)
 - ✅ **Reliability**: Graceful shutdown, structured JSON logging, health check endpoints
 - ✅ **Production Ready**: PM2 configuration for process management
 
@@ -141,7 +144,8 @@ nodejs-sangoma-ami-listener/
 │   ├── ami.ts            # AMI connection and event handling
 │   ├── webhook.ts        # Webhook delivery with retry logic
 │   ├── logger.ts         # Structured JSON logging
-│   └── config.ts         # Environment configuration
+│   ├── config.ts         # Environment configuration
+│   └── utils.ts          # Utility functions (timestamp formatting)
 ├── dist/                 # Compiled JavaScript (generated)
 ├── logs/                 # PM2 log files (generated)
 ├── .env                  # Environment variables (create from .env.example)
@@ -153,142 +157,133 @@ nodejs-sangoma-ami-listener/
 └── README.md
 ```
 
-## Event Mapping
+## Event Processing
 
-The service listens to AMI events and normalizes them into CRM webhook payloads:
+The service listens to AMI events and forwards them directly to webhook endpoints:
 
-| AMI Event | Normalized Event | Description |
-|-----------|------------------|-------------|
-| Newchannel | `call.start` | New call channel created |
-| DialBegin | `call.ringing` | Call is ringing |
-| BridgeEnter | `call.answered` | Call answered (bridged) |
-| MixMonitorStart | `call.recording_started` | Call recording started |
-| MixMonitorStop | `call.recording_stopped` | Call recording stopped |
-| Hangup | `call.ended` | Call ended |
+| AMI Event | Description |
+|-----------|-------------|
+| DialBegin | Call is ringing |
+| BridgeEnter | Call answered (bridged) |
+| MixMonitorStart | Call recording started |
+| MixMonitorStop | Call recording stopped |
+| Hangup | Call ended |
+
+### Event Filtering
+
+- **Channel Filtering**: Events with channels starting with `Local/` or `Macro/` are automatically skipped
+- **Data Sanitization**: The `incomingData` field is automatically removed from all events before sending
+- **Raw Format**: Events are forwarded in their original AMI format (no normalization)
 
 ## Webhook Payload Format
 
-All webhooks are sent as POST requests with the following JSON structure:
+All webhooks are sent as POST requests with the original AMI event format. The service forwards the raw event data with minimal modifications:
 
 ```json
 {
-  "event": "call.start",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "callerIdNum": "1001",
-    "callerIdName": "John Doe",
-    "context": "from-internal",
-    "extension": "1002",
-    "state": "6"
-  }
+  "Event": "DialBegin",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "ChannelState": "4",
+  "ChannelStateDesc": "Ring",
+  "CallerIDNum": "1001",
+  "CallerIDName": "John Doe",
+  "ConnectedLineNum": "1002",
+  "ConnectedLineName": "Jane Doe",
+  "Uniqueid": "1234567890.123",
+  "Destination": "SIP/1002-00000002",
+  "Context": "from-internal",
+  "Exten": "1002",
+  "Priority": "1"
 }
 ```
 
-### Event Types
+**Note**: 
+- The `incomingData` field is automatically removed from all events
+- Timestamps in logs use Asia/Ho_Chi_Minh timezone (UTC+7) format: `2024-01-15T10:30:00.000+07:00`
+- Events are forwarded in their original AMI format (no normalization)
 
-#### `call.start`
-Triggered when a new channel is created.
-```json
-{
-  "event": "call.start",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:30:00.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "callerIdNum": "1001",
-    "callerIdName": "John Doe",
-    "context": "from-internal",
-    "extension": "1002",
-    "state": "6"
-  }
-}
-```
+### Event Examples
 
-#### `call.ringing`
+#### `DialBegin`
 Triggered when a call starts ringing.
 ```json
 {
-  "event": "call.ringing",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:30:01.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "destination": "SIP/1002-00000002",
-    "callerIdNum": "1001",
-    "callerIdName": "John Doe"
-  }
+  "Event": "DialBegin",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "ChannelState": "4",
+  "ChannelStateDesc": "Ring",
+  "CallerIDNum": "1001",
+  "CallerIDName": "John Doe",
+  "Uniqueid": "1234567890.123",
+  "Destination": "SIP/1002-00000002",
+  "Context": "from-internal",
+  "Exten": "1002"
 }
 ```
 
-#### `call.answered`
+#### `BridgeEnter`
 Triggered when a call is answered (bridged).
 ```json
 {
-  "event": "call.answered",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:30:05.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "bridgeUniqueid": "bridge-123",
-    "callerIdNum": "1001",
-    "callerIdName": "John Doe",
-    "connectedLineNum": "1002",
-    "connectedLineName": "Jane Doe"
-  }
+  "Event": "BridgeEnter",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "BridgeUniqueid": "bridge-123",
+  "CallerIDNum": "1001",
+  "CallerIDName": "John Doe",
+  "ConnectedLineNum": "1002",
+  "ConnectedLineName": "Jane Doe",
+  "Uniqueid": "1234567890.123"
 }
 ```
 
-#### `call.recording_started`
+#### `MixMonitorStart`
 Triggered when call recording starts.
 ```json
 {
-  "event": "call.recording_started",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:30:06.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "file": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
-  }
+  "Event": "MixMonitorStart",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "Uniqueid": "1234567890.123",
+  "File": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
 }
 ```
 
-#### `call.recording_stopped`
+#### `MixMonitorStop`
 Triggered when call recording stops.
 ```json
 {
-  "event": "call.recording_stopped",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:35:00.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "file": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
-  }
+  "Event": "MixMonitorStop",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "Uniqueid": "1234567890.123",
+  "File": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
 }
 ```
 
-#### `call.ended`
+#### `Hangup`
 Triggered when a call ends.
 ```json
 {
-  "event": "call.ended",
-  "uniqueid": "1234567890.123",
-  "timestamp": "2024-01-15T10:35:30.000Z",
-  "data": {
-    "channel": "SIP/1001-00000001",
-    "cause": "16",
-    "causeTxt": "Normal Clearing",
-    "duration": "330",
-    "callerIdNum": "1001",
-    "callerIdName": "John Doe",
-    "recording": {
-      "started": true,
-      "file": "/var/spool/asterisk/monitor/20240115-103006-1234567890.123.wav"
-    }
-  }
+  "Event": "Hangup",
+  "Privilege": "call,all",
+  "Channel": "SIP/1001-00000001",
+  "Uniqueid": "1234567890.123",
+  "Cause": "16",
+  "CauseTxt": "Normal Clearing",
+  "Duration": "330",
+  "CallerIDNum": "1001",
+  "CallerIDName": "John Doe"
 }
 ```
+
+**Important Notes:**
+- All events are forwarded in their **original AMI format** (no normalization)
+- The `incomingData` field is **automatically removed** from all events
+- Events with channels starting with `Local/` or `Macro/` are **automatically filtered out**
+- Timestamps in application logs use **Asia/Ho_Chi_Minh timezone (UTC+7)**
 
 ## Health Check Endpoints
 
@@ -299,7 +294,7 @@ Returns service health status.
 ```json
 {
   "status": "ok",
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "timestamp": "2024-01-15T10:30:00.000+07:00",
   "uptime": 3600
 }
 ```
@@ -309,7 +304,7 @@ Returns service readiness status (useful for Kubernetes liveness/readiness probe
 ```json
 {
   "status": "ready",
-  "timestamp": "2024-01-15T10:30:00.000Z"
+  "timestamp": "2024-01-15T10:30:00.000+07:00"
 }
 ```
 
@@ -329,10 +324,10 @@ The service uses structured JSON logging. Logs are written to:
 
 ### Log Format
 
-All logs are in JSON format:
+All logs are in JSON format with timestamps in Asia/Ho_Chi_Minh timezone (UTC+7):
 ```json
 {
-  "timestamp": "2024-01-15T10:30:00.000Z",
+  "timestamp": "2024-01-15T10:30:00.000+07:00",
   "level": "info",
   "message": "Connected to AMI",
   "host": "192.168.1.100",

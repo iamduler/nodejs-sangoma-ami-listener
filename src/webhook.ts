@@ -2,10 +2,7 @@ import { config } from './config';
 import { logger } from './logger';
 
 export interface WebhookPayload {
-  event: string;
-  uniqueid: string;
-  timestamp: string;
-  rawData: Record<string, any>;
+  [key: string]: any;
 }
 
 interface RetryState {

@@ -248,42 +248,55 @@ export class AMIListener {
         channel,
       });
 
-      // Build AMI Originate action object using ami-io Action.Originate
-      const Originate = (ami as any).Action.Originate;
-      const action = new Originate({
-        Channel: channel,
-        Context: context,
-        Exten: exten,
-        Priority: priority,
-        Timeout: timeout,
-        CallerID: extension.toString(),
-      });
+      // Build raw AMI Originate action string (according to AMI protocol)
+      const lines = [
+        'Action: Originate',
+        `Channel: ${channel}`,
+        `Context: ${context}`,
+        `Exten: ${exten}`,
+        `Priority: ${priority}`,
+        `Timeout: ${timeout}`,
+        `CallerID: ${extension}`,
+        '', // empty line terminator
+        '',
+      ];
+      const rawAction = lines.join('\r\n');
 
-      // Send Originate action via AMI with callback
-      // ami-io send() requires (action, callback) signature
-      this.client.send(action, (err: any, res: any) => {
-        if (err) {
-          logger.error('Click2call send error', {
-            error: err.message || err,
+      // Simple wrapper so ami-io can call action.format()
+      class RawAction {
+        private payload: string;
+        constructor(payload: string) {
+          this.payload = payload;
+        }
+        format() {
+          return this.payload;
+        }
+      }
+
+      const action = new RawAction(rawAction);
+
+      // Send Originate action via AMI with callback.
+      // ami-io send() requires (action, callback) signature.
+      await new Promise<void>((resolve, reject) => {
+        this.client!.send(action, (err: any, res: any) => {
+          if (err) {
+            logger.error('Click2call send error', {
+              error: err.message || err,
+              extension,
+              phoneNumber: cleanPhoneNumber,
+            });
+            return reject(err);
+          }
+
+          logger.info('Click2call originate sent to AMI', {
             extension,
             phoneNumber: cleanPhoneNumber,
-          });
-
-          // Throw error to be caught by the caller
-          throw new Error(err.message || err.toString());
-        } else {
-          logger.debug('Click2call action sent', {
-            extension,
-            phoneNumber: cleanPhoneNumber,
+            channel,
             response: res,
           });
-        }
-      });
 
-      logger.info('Click2call originate sent to AMI', {
-        extension,
-        phoneNumber: cleanPhoneNumber,
-        channel,
+          resolve();
+        });
       });
 
       return {

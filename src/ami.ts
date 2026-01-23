@@ -248,20 +248,34 @@ export class AMIListener {
         channel,
       });
 
-      // Build AMI Originate action object
-      const action = new (ami as any).Action({
-        Action: 'Originate',
+      // Build AMI Originate action object using ami-io Action.Originate
+      const Originate = (ami as any).Action.Originate;
+      const action = new Originate({
         Channel: channel,
         Context: context,
         Exten: exten,
-        Priority: priority.toString(),
-        Timeout: timeout.toString(),
-        Async: 'true',
+        Priority: priority,
+        Timeout: timeout,
         CallerID: extension.toString(),
       });
 
-      // Send Originate action via AMI (fire-and-forget)
-      this.client.send(action);
+      // Send Originate action via AMI with callback
+      // ami-io send() requires (action, callback) signature
+      this.client.send(action, (err: any, res: any) => {
+        if (err) {
+          logger.error('Click2call send error', {
+            error: err.message || err,
+            extension,
+            phoneNumber: cleanPhoneNumber,
+          });
+        } else {
+          logger.debug('Click2call action sent', {
+            extension,
+            phoneNumber: cleanPhoneNumber,
+            response: res,
+          });
+        }
+      });
 
       logger.info('Click2call originate sent to AMI', {
         extension,

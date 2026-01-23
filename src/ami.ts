@@ -268,6 +268,9 @@ export class AMIListener {
             extension,
             phoneNumber: cleanPhoneNumber,
           });
+
+          // Throw error to be caught by the caller
+          throw new Error(err.message || err.toString());
         } else {
           logger.debug('Click2call action sent', {
             extension,

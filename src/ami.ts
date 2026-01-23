@@ -1,4 +1,4 @@
-import { createClient } from 'ami-io';
+import * as ami from 'ami-io';
 import { config } from './config';
 import { logger } from './logger';
 import { webhookSender, WebhookPayload } from './webhook';
@@ -66,7 +66,7 @@ export class AMIListener {
   }
 
   private createClient(): any {
-    return createClient({
+    return ami.createClient({
       host: config.ami.host,
       port: config.ami.port,
       login: config.ami.username,
@@ -248,24 +248,20 @@ export class AMIListener {
         channel,
       });
 
-      // Build raw AMI Originate action string
-      const lines = [
-        'Action: Originate',
-        `Channel: ${channel}`,
-        `Context: ${context}`,
-        `Exten: ${exten}`,
-        `Priority: ${priority}`,
-        `Timeout: ${timeout}`,
-        'Async: true',
-        `CallerID: ${extension}`,
-        '', // AMI message terminator (empty line)
-        '',
-      ];
+      // Build AMI Originate action object
+      const action = new (ami as any).Action({
+        Action: 'Originate',
+        Channel: channel,
+        Context: context,
+        Exten: exten,
+        Priority: priority.toString(),
+        Timeout: timeout.toString(),
+        Async: 'true',
+        CallerID: extension.toString(),
+      });
 
-      const rawAction = lines.join('\r\n');
-
-      // Send Originate action via AMI
-      this.client.send(rawAction);
+      // Send Originate action via AMI (fire-and-forget)
+      this.client.send(action);
 
       logger.info('Click2call originate sent to AMI', {
         extension,

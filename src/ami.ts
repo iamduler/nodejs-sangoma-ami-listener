@@ -248,51 +248,35 @@ export class AMIListener {
         channel,
       });
 
-      // Send Originate action via AMI
-      const action = {
-        Action: 'Originate',
-        Channel: channel,
-        Context: context,
-        Exten: exten,
-        Priority: priority.toString(),
-        Timeout: timeout.toString(),
-        Async: 'true', // Make it async so it doesn't block
-      };
+      // Build raw AMI Originate action string
+      const lines = [
+        'Action: Originate',
+        `Channel: ${channel}`,
+        `Context: ${context}`,
+        `Exten: ${exten}`,
+        `Priority: ${priority}`,
+        `Timeout: ${timeout}`,
+        'Async: true',
+        `CallerID: ${extension}`,
+        '', // AMI message terminator (empty line)
+        '',
+      ];
 
-      const response = await new Promise<any>((resolve, reject) => {
-        this.client.action(action, (err: any, res: any) => {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(res);
-          }
-        });
+      const rawAction = lines.join('\r\n');
+
+      // Send Originate action via AMI
+      this.client.send(rawAction);
+
+      logger.info('Click2call originate sent to AMI', {
+        extension,
+        phoneNumber: cleanPhoneNumber,
+        channel,
       });
 
-      if (response.Response === 'Success') {
-        logger.info('Click2call initiated successfully', {
-          extension,
-          phoneNumber: cleanPhoneNumber,
-          actionId: response.ActionID,
-        });
-
-        return {
-          success: true,
-          message: 'Call initiated successfully',
-          actionId: response.ActionID,
-        };
-      } else {
-        logger.error('Click2call failed', {
-          extension,
-          phoneNumber: cleanPhoneNumber,
-          response: response.Message || response,
-        });
-
-        return {
-          success: false,
-          message: response.Message || 'Failed to initiate call',
-        };
-      }
+      return {
+        success: true,
+        message: 'Call originate request sent to AMI',
+      };
     } catch (error: any) {
       logger.error('Error initiating click2call', {
         error: error.message,

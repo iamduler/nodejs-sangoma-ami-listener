@@ -76,196 +76,100 @@ export class AMIListener {
 
   /**
    * Merge two Hangup events with the same linkedid into one event
+   * Keeps the first event and adds calleridnum (from internal) and destcalleridnum (from trunk)
    */
   private mergeHangupEvents(event1: any, event2: any): any {
-    // Use the later timestamp
-    const timestamp1 = new Date(event1.timestamp || 0).getTime();
-    const timestamp2 = new Date(event2.timestamp || 0).getTime();
-    const laterEvent = timestamp2 > timestamp1 ? event2 : event1;
-    const earlierEvent = timestamp2 > timestamp1 ? event1 : event2;
-
     // Determine which is caller (extension/internal) and which is callee (external/trunk)
-    // For outbound calls:
-    // - Extension/internal channel usually has context "from-internal"
-    // - Trunk/external channel usually has context "from-trunk" or similar
-    const event1Context = (earlierEvent.context || earlierEvent.Context || '').toLowerCase();
-    const event2Context = (laterEvent.context || laterEvent.Context || '').toLowerCase();
+    const event1Context = (event1.context || event1.Context || '').toLowerCase();
+    const event2Context = (event2.context || event2.Context || '').toLowerCase();
     
     const event1IsInternal = event1Context.includes('internal');
     const event2IsInternal = event2Context.includes('internal');
     
-    // Determine caller and callee
-    let callerEvent, calleeEvent;
+    // Determine caller and callee events
+    let callerEvent, calleeEvent, firstEvent;
     if (event1IsInternal && !event2IsInternal) {
       // Event1 is internal (caller), Event2 is external (callee)
-      callerEvent = earlierEvent;
-      calleeEvent = laterEvent;
+      callerEvent = event1;
+      calleeEvent = event2;
+      firstEvent = event1; // Use first event as base
     } else if (!event1IsInternal && event2IsInternal) {
       // Event1 is external (callee), Event2 is internal (caller)
-      callerEvent = laterEvent;
-      calleeEvent = earlierEvent;
+      callerEvent = event2;
+      calleeEvent = event1;
+      firstEvent = event1; // Use first event as base
     } else {
-      // Both same type or unclear, use order (earlier = caller, later = callee)
-      callerEvent = earlierEvent;
-      calleeEvent = laterEvent;
+      // Both same type or unclear, use order
+      callerEvent = event1IsInternal ? event1 : event2;
+      calleeEvent = event1IsInternal ? event2 : event1;
+      firstEvent = event1; // Use first event as base
     }
 
-    // Create merged event with information from both channels
-    const merged: any = {
-      ...laterEvent,
-      // Keep both channel information
-      channels: [
-        {
-          channel: earlierEvent.channel || earlierEvent.Channel,
-          calleridnum: earlierEvent.calleridnum || earlierEvent.CallerIDNum,
-          calleridname: earlierEvent.calleridname || earlierEvent.CallerIDName,
-          connectedlinenum: earlierEvent.connectedlinenum || earlierEvent.ConnectedLineNum,
-          connectedlinename: earlierEvent.connectedlinename || earlierEvent.ConnectedLineName,
-          context: earlierEvent.context || earlierEvent.Context,
-          uniqueid: earlierEvent.uniqueid || earlierEvent.Uniqueid,
-        },
-        {
-          channel: laterEvent.channel || laterEvent.Channel,
-          calleridnum: laterEvent.calleridnum || laterEvent.CallerIDNum,
-          calleridname: laterEvent.calleridname || laterEvent.CallerIDName,
-          connectedlinenum: laterEvent.connectedlinenum || laterEvent.ConnectedLineNum,
-          connectedlinename: laterEvent.connectedlinename || laterEvent.ConnectedLineName,
-          context: laterEvent.context || laterEvent.Context,
-          uniqueid: laterEvent.uniqueid || laterEvent.Uniqueid,
-        },
-      ],
-      // Caller information (extension/internal) - từ event có context "from-internal"
-      caller: {
-        channel: callerEvent.channel || callerEvent.Channel,
-        calleridnum: callerEvent.calleridnum || callerEvent.CallerIDNum,
-        calleridname: callerEvent.calleridname || callerEvent.CallerIDName,
-        context: callerEvent.context || callerEvent.Context,
-        uniqueid: callerEvent.uniqueid || callerEvent.Uniqueid,
-      },
-      // Callee information (external/trunk) - từ event có context "from-trunk"
-      // Lấy calleridnum làm số callee (không phải connectedlinenum)
-      callee: {
-        channel: calleeEvent.channel || calleeEvent.Channel,
-        calleridnum: calleeEvent.calleridnum || calleeEvent.CallerIDNum,
-        calleridname: calleeEvent.calleridname || calleeEvent.CallerIDName,
-        context: calleeEvent.context || calleeEvent.Context,
-        uniqueid: calleeEvent.uniqueid || calleeEvent.Uniqueid,
-      },
-      // Hotline information - connectedlinenum từ event "from-trunk" là số hotline
-      hotline: {
-        number: calleeEvent.connectedlinenum || calleeEvent.ConnectedLineNum,
-        name: calleeEvent.connectedlinename || calleeEvent.ConnectedLineName,
-      },
-      // Use the latest timestamp
-      timestamp: laterEvent.timestamp || formatLocalTimestamp(),
-    };
+    // Get calleridnum from internal event (caller)
+    const calleridnum = callerEvent.calleridnum || callerEvent.CallerIDNum || '';
+    // Get calleridnum from trunk event (callee/destination)
+    const destcalleridnum = calleeEvent.calleridnum || calleeEvent.CallerIDNum || '';
 
-    // Remove individual channel fields to avoid confusion
-    delete merged.channel;
-    delete merged.Channel;
-    delete merged.calleridnum;
-    delete merged.CallerIDNum;
-    delete merged.calleridname;
-    delete merged.CallerIDName;
-    delete merged.connectedlinenum;
-    delete merged.ConnectedLineNum;
-    delete merged.connectedlinename;
-    delete merged.ConnectedLineName;
+    // Create merged event: keep first event and add calleridnum and destcalleridnum
+    const merged: any = {
+      ...firstEvent,
+      // Add calleridnum from internal event
+      calleridnum: calleridnum,
+      CallerIDNum: calleridnum,
+      // Add destcalleridnum from trunk event (destination number)
+      destcalleridnum: destcalleridnum,
+      DestCallerIDNum: destcalleridnum,
+    };
 
     return merged;
   }
 
   /**
    * Merge two BridgeEnter events with the same linkedid into one event
+   * Keeps the first event and adds calleridnum (from internal) and destcalleridnum (from trunk)
    */
   private mergeBridgeEnterEvents(event1: any, event2: any): any {
-    // Use the later timestamp
-    const timestamp1 = new Date(event1.timestamp || 0).getTime();
-    const timestamp2 = new Date(event2.timestamp || 0).getTime();
-    const laterEvent = timestamp2 > timestamp1 ? event2 : event1;
-    const earlierEvent = timestamp2 > timestamp1 ? event1 : event2;
-
     // Determine which is caller (extension/internal) and which is callee (external/trunk)
-    const event1Context = (earlierEvent.context || earlierEvent.Context || '').toLowerCase();
-    const event2Context = (laterEvent.context || laterEvent.Context || '').toLowerCase();
+    const event1Context = (event1.context || event1.Context || '').toLowerCase();
+    const event2Context = (event2.context || event2.Context || '').toLowerCase();
     
     const event1IsInternal = event1Context.includes('internal');
     const event2IsInternal = event2Context.includes('internal');
     
-    // Determine caller and callee
-    let callerEvent, calleeEvent;
+    // Determine caller and callee events
+    let callerEvent, calleeEvent, firstEvent;
     if (event1IsInternal && !event2IsInternal) {
-      callerEvent = earlierEvent;
-      calleeEvent = laterEvent;
+      // Event1 is internal (caller), Event2 is external (callee)
+      callerEvent = event1;
+      calleeEvent = event2;
+      firstEvent = event1; // Use first event as base
     } else if (!event1IsInternal && event2IsInternal) {
-      callerEvent = laterEvent;
-      calleeEvent = earlierEvent;
+      // Event1 is external (callee), Event2 is internal (caller)
+      callerEvent = event2;
+      calleeEvent = event1;
+      firstEvent = event1; // Use first event as base
     } else {
-      callerEvent = earlierEvent;
-      calleeEvent = laterEvent;
+      // Both same type or unclear, use order
+      callerEvent = event1IsInternal ? event1 : event2;
+      calleeEvent = event1IsInternal ? event2 : event1;
+      firstEvent = event1; // Use first event as base
     }
 
-    // Create merged event with information from both channels
-    const merged: any = {
-      ...laterEvent,
-      // Keep both channel information
-      channels: [
-        {
-          channel: earlierEvent.channel || earlierEvent.Channel,
-          calleridnum: earlierEvent.calleridnum || earlierEvent.CallerIDNum,
-          calleridname: earlierEvent.calleridname || earlierEvent.CallerIDName,
-          connectedlinenum: earlierEvent.connectedlinenum || earlierEvent.ConnectedLineNum,
-          connectedlinename: earlierEvent.connectedlinename || earlierEvent.ConnectedLineName,
-          context: earlierEvent.context || earlierEvent.Context,
-          uniqueid: earlierEvent.uniqueid || earlierEvent.Uniqueid,
-        },
-        {
-          channel: laterEvent.channel || laterEvent.Channel,
-          calleridnum: laterEvent.calleridnum || laterEvent.CallerIDNum,
-          calleridname: laterEvent.calleridname || laterEvent.CallerIDName,
-          connectedlinenum: laterEvent.connectedlinenum || laterEvent.ConnectedLineNum,
-          connectedlinename: laterEvent.connectedlinename || laterEvent.ConnectedLineName,
-          context: laterEvent.context || laterEvent.Context,
-          uniqueid: laterEvent.uniqueid || laterEvent.Uniqueid,
-        },
-      ],
-      // Caller information (extension/internal) - từ event có context "from-internal"
-      caller: {
-        channel: callerEvent.channel || callerEvent.Channel,
-        calleridnum: callerEvent.calleridnum || callerEvent.CallerIDNum,
-        calleridname: callerEvent.calleridname || callerEvent.CallerIDName,
-        context: callerEvent.context || callerEvent.Context,
-        uniqueid: callerEvent.uniqueid || callerEvent.Uniqueid,
-      },
-      // Callee information (external/trunk) - từ event có context "from-trunk"
-      // Lấy calleridnum làm số callee (không phải connectedlinenum)
-      callee: {
-        channel: calleeEvent.channel || calleeEvent.Channel,
-        calleridnum: calleeEvent.calleridnum || calleeEvent.CallerIDNum,
-        calleridname: calleeEvent.calleridname || calleeEvent.CallerIDName,
-        context: calleeEvent.context || calleeEvent.Context,
-        uniqueid: calleeEvent.uniqueid || calleeEvent.Uniqueid,
-      },
-      // Hotline information - connectedlinenum từ event "from-trunk" là số hotline
-      hotline: {
-        number: calleeEvent.connectedlinenum || calleeEvent.ConnectedLineNum,
-        name: calleeEvent.connectedlinename || calleeEvent.ConnectedLineName,
-      },
-      // Use the latest timestamp
-      timestamp: laterEvent.timestamp || formatLocalTimestamp(),
-    };
+    // Get calleridnum from internal event (caller)
+    const calleridnum = callerEvent.calleridnum || callerEvent.CallerIDNum || '';
+    // Get calleridnum from trunk event (callee/destination)
+    const destcalleridnum = calleeEvent.calleridnum || calleeEvent.CallerIDNum || '';
 
-    // Remove individual channel fields to avoid confusion
-    delete merged.channel;
-    delete merged.Channel;
-    delete merged.calleridnum;
-    delete merged.CallerIDNum;
-    delete merged.calleridname;
-    delete merged.CallerIDName;
-    delete merged.connectedlinenum;
-    delete merged.ConnectedLineNum;
-    delete merged.connectedlinename;
-    delete merged.ConnectedLineName;
+    // Create merged event: keep first event and add calleridnum and destcalleridnum
+    const merged: any = {
+      ...firstEvent,
+      // Add calleridnum from internal event
+      calleridnum: calleridnum,
+      CallerIDNum: calleridnum,
+      // Add destcalleridnum from trunk event (destination number)
+      destcalleridnum: destcalleridnum,
+      DestCallerIDNum: destcalleridnum,
+    };
 
     return merged;
   }

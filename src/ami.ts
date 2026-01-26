@@ -4,11 +4,20 @@ import { logger } from './logger';
 import { webhookSender, WebhookPayload } from './webhook';
 import { formatLocalTimestamp } from './utils';
 
+interface PendingEvent {
+  event: any;
+  timestamp: number;
+  timeout: NodeJS.Timeout;
+}
+
 export class AMIListener {
   private client: any | null = null;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts: number = 0;
   private isShuttingDown: boolean = false;
+  private pendingHangups: Map<string, PendingEvent> = new Map();
+  private pendingBridgeEnters: Map<string, PendingEvent> = new Map();
+  private readonly eventMergeTimeout = 2000; // 2 seconds to wait for second event
 
   /**
    * Check if event should be processed based on channel name
@@ -63,6 +72,346 @@ export class AMIListener {
     }
 
     return sanitized;
+  }
+
+  /**
+   * Merge two Hangup events with the same linkedid into one event
+   */
+  private mergeHangupEvents(event1: any, event2: any): any {
+    // Use the later timestamp
+    const timestamp1 = new Date(event1.timestamp || 0).getTime();
+    const timestamp2 = new Date(event2.timestamp || 0).getTime();
+    const laterEvent = timestamp2 > timestamp1 ? event2 : event1;
+    const earlierEvent = timestamp2 > timestamp1 ? event1 : event2;
+
+    // Determine which is caller (extension/internal) and which is callee (external/trunk)
+    // For outbound calls:
+    // - Extension/internal channel usually has context "from-internal"
+    // - Trunk/external channel usually has context "from-trunk" or similar
+    const event1Context = (earlierEvent.context || earlierEvent.Context || '').toLowerCase();
+    const event2Context = (laterEvent.context || laterEvent.Context || '').toLowerCase();
+    
+    const event1IsInternal = event1Context.includes('internal');
+    const event2IsInternal = event2Context.includes('internal');
+    
+    // Determine caller and callee
+    let callerEvent, calleeEvent;
+    if (event1IsInternal && !event2IsInternal) {
+      // Event1 is internal (caller), Event2 is external (callee)
+      callerEvent = earlierEvent;
+      calleeEvent = laterEvent;
+    } else if (!event1IsInternal && event2IsInternal) {
+      // Event1 is external (callee), Event2 is internal (caller)
+      callerEvent = laterEvent;
+      calleeEvent = earlierEvent;
+    } else {
+      // Both same type or unclear, use order (earlier = caller, later = callee)
+      callerEvent = earlierEvent;
+      calleeEvent = laterEvent;
+    }
+
+    // Create merged event with information from both channels
+    const merged: any = {
+      ...laterEvent,
+      // Keep both channel information
+      channels: [
+        {
+          channel: earlierEvent.channel || earlierEvent.Channel,
+          calleridnum: earlierEvent.calleridnum || earlierEvent.CallerIDNum,
+          calleridname: earlierEvent.calleridname || earlierEvent.CallerIDName,
+          connectedlinenum: earlierEvent.connectedlinenum || earlierEvent.ConnectedLineNum,
+          connectedlinename: earlierEvent.connectedlinename || earlierEvent.ConnectedLineName,
+          context: earlierEvent.context || earlierEvent.Context,
+          uniqueid: earlierEvent.uniqueid || earlierEvent.Uniqueid,
+        },
+        {
+          channel: laterEvent.channel || laterEvent.Channel,
+          calleridnum: laterEvent.calleridnum || laterEvent.CallerIDNum,
+          calleridname: laterEvent.calleridname || laterEvent.CallerIDName,
+          connectedlinenum: laterEvent.connectedlinenum || laterEvent.ConnectedLineNum,
+          connectedlinename: laterEvent.connectedlinename || laterEvent.ConnectedLineName,
+          context: laterEvent.context || laterEvent.Context,
+          uniqueid: laterEvent.uniqueid || laterEvent.Uniqueid,
+        },
+      ],
+      // Caller information (extension/internal) - từ event có context "from-internal"
+      caller: {
+        channel: callerEvent.channel || callerEvent.Channel,
+        calleridnum: callerEvent.calleridnum || callerEvent.CallerIDNum,
+        calleridname: callerEvent.calleridname || callerEvent.CallerIDName,
+        context: callerEvent.context || callerEvent.Context,
+        uniqueid: callerEvent.uniqueid || callerEvent.Uniqueid,
+      },
+      // Callee information (external/trunk) - từ event có context "from-trunk"
+      // Lấy calleridnum làm số callee (không phải connectedlinenum)
+      callee: {
+        channel: calleeEvent.channel || calleeEvent.Channel,
+        calleridnum: calleeEvent.calleridnum || calleeEvent.CallerIDNum,
+        calleridname: calleeEvent.calleridname || calleeEvent.CallerIDName,
+        context: calleeEvent.context || calleeEvent.Context,
+        uniqueid: calleeEvent.uniqueid || calleeEvent.Uniqueid,
+      },
+      // Hotline information - connectedlinenum từ event "from-trunk" là số hotline
+      hotline: {
+        number: calleeEvent.connectedlinenum || calleeEvent.ConnectedLineNum,
+        name: calleeEvent.connectedlinename || calleeEvent.ConnectedLineName,
+      },
+      // Use the latest timestamp
+      timestamp: laterEvent.timestamp || formatLocalTimestamp(),
+    };
+
+    // Remove individual channel fields to avoid confusion
+    delete merged.channel;
+    delete merged.Channel;
+    delete merged.calleridnum;
+    delete merged.CallerIDNum;
+    delete merged.calleridname;
+    delete merged.CallerIDName;
+    delete merged.connectedlinenum;
+    delete merged.ConnectedLineNum;
+    delete merged.connectedlinename;
+    delete merged.ConnectedLineName;
+
+    return merged;
+  }
+
+  /**
+   * Merge two BridgeEnter events with the same linkedid into one event
+   */
+  private mergeBridgeEnterEvents(event1: any, event2: any): any {
+    // Use the later timestamp
+    const timestamp1 = new Date(event1.timestamp || 0).getTime();
+    const timestamp2 = new Date(event2.timestamp || 0).getTime();
+    const laterEvent = timestamp2 > timestamp1 ? event2 : event1;
+    const earlierEvent = timestamp2 > timestamp1 ? event1 : event2;
+
+    // Determine which is caller (extension/internal) and which is callee (external/trunk)
+    const event1Context = (earlierEvent.context || earlierEvent.Context || '').toLowerCase();
+    const event2Context = (laterEvent.context || laterEvent.Context || '').toLowerCase();
+    
+    const event1IsInternal = event1Context.includes('internal');
+    const event2IsInternal = event2Context.includes('internal');
+    
+    // Determine caller and callee
+    let callerEvent, calleeEvent;
+    if (event1IsInternal && !event2IsInternal) {
+      callerEvent = earlierEvent;
+      calleeEvent = laterEvent;
+    } else if (!event1IsInternal && event2IsInternal) {
+      callerEvent = laterEvent;
+      calleeEvent = earlierEvent;
+    } else {
+      callerEvent = earlierEvent;
+      calleeEvent = laterEvent;
+    }
+
+    // Create merged event with information from both channels
+    const merged: any = {
+      ...laterEvent,
+      // Keep both channel information
+      channels: [
+        {
+          channel: earlierEvent.channel || earlierEvent.Channel,
+          calleridnum: earlierEvent.calleridnum || earlierEvent.CallerIDNum,
+          calleridname: earlierEvent.calleridname || earlierEvent.CallerIDName,
+          connectedlinenum: earlierEvent.connectedlinenum || earlierEvent.ConnectedLineNum,
+          connectedlinename: earlierEvent.connectedlinename || earlierEvent.ConnectedLineName,
+          context: earlierEvent.context || earlierEvent.Context,
+          uniqueid: earlierEvent.uniqueid || earlierEvent.Uniqueid,
+        },
+        {
+          channel: laterEvent.channel || laterEvent.Channel,
+          calleridnum: laterEvent.calleridnum || laterEvent.CallerIDNum,
+          calleridname: laterEvent.calleridname || laterEvent.CallerIDName,
+          connectedlinenum: laterEvent.connectedlinenum || laterEvent.ConnectedLineNum,
+          connectedlinename: laterEvent.connectedlinename || laterEvent.ConnectedLineName,
+          context: laterEvent.context || laterEvent.Context,
+          uniqueid: laterEvent.uniqueid || laterEvent.Uniqueid,
+        },
+      ],
+      // Caller information (extension/internal) - từ event có context "from-internal"
+      caller: {
+        channel: callerEvent.channel || callerEvent.Channel,
+        calleridnum: callerEvent.calleridnum || callerEvent.CallerIDNum,
+        calleridname: callerEvent.calleridname || callerEvent.CallerIDName,
+        context: callerEvent.context || callerEvent.Context,
+        uniqueid: callerEvent.uniqueid || callerEvent.Uniqueid,
+      },
+      // Callee information (external/trunk) - từ event có context "from-trunk"
+      // Lấy calleridnum làm số callee (không phải connectedlinenum)
+      callee: {
+        channel: calleeEvent.channel || calleeEvent.Channel,
+        calleridnum: calleeEvent.calleridnum || calleeEvent.CallerIDNum,
+        calleridname: calleeEvent.calleridname || calleeEvent.CallerIDName,
+        context: calleeEvent.context || calleeEvent.Context,
+        uniqueid: calleeEvent.uniqueid || calleeEvent.Uniqueid,
+      },
+      // Hotline information - connectedlinenum từ event "from-trunk" là số hotline
+      hotline: {
+        number: calleeEvent.connectedlinenum || calleeEvent.ConnectedLineNum,
+        name: calleeEvent.connectedlinename || calleeEvent.ConnectedLineName,
+      },
+      // Use the latest timestamp
+      timestamp: laterEvent.timestamp || formatLocalTimestamp(),
+    };
+
+    // Remove individual channel fields to avoid confusion
+    delete merged.channel;
+    delete merged.Channel;
+    delete merged.calleridnum;
+    delete merged.CallerIDNum;
+    delete merged.calleridname;
+    delete merged.CallerIDName;
+    delete merged.connectedlinenum;
+    delete merged.ConnectedLineNum;
+    delete merged.connectedlinename;
+    delete merged.ConnectedLineName;
+
+    return merged;
+  }
+
+  /**
+   * Handle Hangup event - merge events with same linkedid before sending to webhook
+   */
+  private handleHangupEvent(event: any): void {
+    const linkedid = event.linkedid || event.Linkedid;
+    
+    if (!linkedid) {
+      // No linkedid, send immediately
+      logger.warn('Hangup event without linkedid, sending immediately', {
+        uniqueid: event.uniqueid || event.Uniqueid,
+      });
+      const payload: WebhookPayload = this.sanitizeEvent(event);
+      webhookSender.send(payload).catch((error) => {
+        logger.error('Failed to send Hangup webhook', { error: error.message });
+      });
+      return;
+    }
+
+    const existing = this.pendingHangups.get(linkedid);
+
+    if (existing) {
+      // Found matching Hangup event, merge and send
+      clearTimeout(existing.timeout);
+      this.pendingHangups.delete(linkedid);
+
+      logger.debug('Merging Hangup events with same linkedid', {
+        linkedid,
+        uniqueid1: existing.event.uniqueid || existing.event.Uniqueid,
+        uniqueid2: event.uniqueid || event.Uniqueid,
+      });
+
+      const merged = this.mergeHangupEvents(existing.event, event);
+      const payload: WebhookPayload = this.sanitizeEvent(merged);
+
+      webhookSender.send(payload).catch((error) => {
+        logger.error('Failed to send merged Hangup webhook', { 
+          error: error.message, 
+          linkedid 
+        });
+      });
+    } else {
+      // First Hangup event for this linkedid, store and wait
+      const timeout = setTimeout(() => {
+        this.pendingHangups.delete(linkedid);
+        
+        logger.warn('Hangup merge timeout - sending single event', {
+          linkedid,
+          uniqueid: event.uniqueid || event.Uniqueid,
+        });
+
+        const payload: WebhookPayload = this.sanitizeEvent(event);
+        webhookSender.send(payload).catch((error) => {
+          logger.error('Failed to send Hangup webhook after timeout', { 
+            error: error.message,
+            linkedid 
+          });
+        });
+      }, this.eventMergeTimeout);
+
+      this.pendingHangups.set(linkedid, {
+        event,
+        timestamp: Date.now(),
+        timeout,
+      });
+
+      logger.debug('Storing Hangup event, waiting for merge', {
+        linkedid,
+        uniqueid: event.uniqueid || event.Uniqueid,
+      });
+    }
+  }
+
+  /**
+   * Handle BridgeEnter event - merge events with same linkedid before sending to webhook
+   */
+  private handleBridgeEnterEvent(event: any): void {
+    const linkedid = event.linkedid || event.Linkedid;
+    
+    if (!linkedid) {
+      // No linkedid, send immediately
+      logger.warn('BridgeEnter event without linkedid, sending immediately', {
+        uniqueid: event.uniqueid || event.Uniqueid,
+      });
+      const payload: WebhookPayload = this.sanitizeEvent(event);
+      webhookSender.send(payload).catch((error) => {
+        logger.error('Failed to send BridgeEnter webhook', { error: error.message });
+      });
+      return;
+    }
+
+    const existing = this.pendingBridgeEnters.get(linkedid);
+
+    if (existing) {
+      // Found matching BridgeEnter event, merge and send
+      clearTimeout(existing.timeout);
+      this.pendingBridgeEnters.delete(linkedid);
+
+      logger.debug('Merging BridgeEnter events with same linkedid', {
+        linkedid,
+        uniqueid1: existing.event.uniqueid || existing.event.Uniqueid,
+        uniqueid2: event.uniqueid || event.Uniqueid,
+      });
+
+      const merged = this.mergeBridgeEnterEvents(existing.event, event);
+      const payload: WebhookPayload = this.sanitizeEvent(merged);
+
+      webhookSender.send(payload).catch((error) => {
+        logger.error('Failed to send merged BridgeEnter webhook', { 
+          error: error.message, 
+          linkedid 
+        });
+      });
+    } else {
+      // First BridgeEnter event for this linkedid, store and wait
+      const timeout = setTimeout(() => {
+        this.pendingBridgeEnters.delete(linkedid);
+        
+        logger.warn('BridgeEnter merge timeout - sending single event', {
+          linkedid,
+          uniqueid: event.uniqueid || event.Uniqueid,
+        });
+
+        const payload: WebhookPayload = this.sanitizeEvent(event);
+        webhookSender.send(payload).catch((error) => {
+          logger.error('Failed to send BridgeEnter webhook after timeout', { 
+            error: error.message,
+            linkedid 
+          });
+        });
+      }, this.eventMergeTimeout);
+
+      this.pendingBridgeEnters.set(linkedid, {
+        event,
+        timestamp: Date.now(),
+        timeout,
+      });
+
+      logger.debug('Storing BridgeEnter event, waiting for merge', {
+        linkedid,
+        uniqueid: event.uniqueid || event.Uniqueid,
+      });
+    }
   }
 
   private createClient(): any {
@@ -190,6 +539,19 @@ export class AMIListener {
   
         logger.debug(`${eventName} event received`, { uniqueid, channel });
   
+        // Special handling for Hangup events - merge events with same linkedid
+        if (eventName === 'Hangup') {
+          this.handleHangupEvent(event);
+          return;
+        }
+  
+        // Special handling for BridgeEnter events - merge events with same linkedid
+        if (eventName === 'BridgeEnter') {
+          this.handleBridgeEnterEvent(event);
+          return;
+        }
+  
+        // For other events, send immediately
         const payload: WebhookPayload = this.sanitizeEvent(event);
   
         webhookSender.send(payload).catch((error) => {
@@ -327,6 +689,20 @@ export class AMIListener {
   async stop(): Promise<void> {
     logger.info('Stopping AMI Listener');
     this.isShuttingDown = true;
+
+    // Clear all pending Hangup events
+    for (const [linkedid, pending] of this.pendingHangups.entries()) {
+      clearTimeout(pending.timeout);
+      logger.debug('Clearing pending Hangup event on shutdown', { linkedid });
+    }
+    this.pendingHangups.clear();
+
+    // Clear all pending BridgeEnter events
+    for (const [linkedid, pending] of this.pendingBridgeEnters.entries()) {
+      clearTimeout(pending.timeout);
+      logger.debug('Clearing pending BridgeEnter event on shutdown', { linkedid });
+    }
+    this.pendingBridgeEnters.clear();
 
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

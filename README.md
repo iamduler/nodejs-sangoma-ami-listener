@@ -6,7 +6,12 @@ Production-ready Node.js TypeScript service for listening to Asterisk AMI (Aster
 
 - ✅ **AMI Connection**: Connects to Asterisk AMI over TCP with auto-reconnect
 - ✅ **Event Listening**: Monitors key call events (DialBegin, BridgeEnter, Hangup)
-- ✅ **Raw Event Forwarding**: Forwards original AMI event format to webhook endpoint (no normalization)
+- ✅ **Event Merging**: Automatically merges Hangup and BridgeEnter events with the same `linkedid` for outbound calls
+  - Combines caller (extension/internal) and callee (external/trunk) information into a single event
+  - Identifies caller/callee based on context (`from-internal` vs `from-trunk`)
+  - Includes hotline information in merged events
+  - 2-second timeout for waiting for the second event before sending
+- ✅ **Raw Event Forwarding**: Forwards original AMI event format to webhook endpoint (no normalization for DialBegin)
 - ✅ **Event Filtering**: Automatically filters out events with:
   - Channels starting with "Local/" or "Macro/"
   - Destination channels (for DialBegin) starting with "Local/" or "Macro/"
@@ -165,11 +170,29 @@ nodejs-sangoma-ami-listener/
 
 The service listens to AMI events and forwards them directly to webhook endpoints:
 
-| AMI Event | Description |
-|-----------|-------------|
-| DialBegin | Call is ringing |
-| BridgeEnter | Call answered (bridged) |
-| Hangup | Call ended |
+| AMI Event | Description | Merging Behavior |
+|-----------|-------------|-----------------|
+| DialBegin | Call is ringing | Sent immediately (no merging) |
+| BridgeEnter | Call answered (bridged) | **Merged** with same `linkedid` before sending |
+| Hangup | Call ended | **Merged** with same `linkedid` before sending |
+
+### Event Merging (Hangup & BridgeEnter)
+
+For outbound calls, Asterisk generates two separate Hangup/BridgeEnter events (one for the extension channel and one for the trunk channel) with the same `linkedid`. The service automatically merges these events into a single webhook payload containing complete caller and callee information.
+
+**How it works:**
+1. When a Hangup or BridgeEnter event is received, the service checks if there's already a pending event with the same `linkedid`
+2. If found, both events are merged into one with:
+   - `channels`: Array containing information from both channels
+   - `caller`: Information from the extension/internal channel (context: `from-internal`)
+   - `callee`: Information from the external/trunk channel (context: `from-trunk`)
+   - `hotline`: Hotline number from `connectedlinenum` of the trunk channel
+3. If no matching event is found within 2 seconds, the single event is sent as-is
+
+**Merged Event Structure:**
+- **Caller**: Identified by context containing "internal" → `calleridnum` is the extension number
+- **Callee**: Identified by context containing "trunk" → `calleridnum` is the external phone number
+- **Hotline**: `connectedlinenum` from the trunk channel is the hotline number displayed to the callee
 
 ### Event Filtering
 
@@ -187,11 +210,13 @@ The service automatically filters out events based on the following criteria:
    - The `incomingData` field is automatically removed from all events
    - A `timestamp` field (Asia/Ho_Chi_Minh timezone, UTC+7) is automatically added to each event
 
-4. **Raw Format**: Events are forwarded in their original AMI format (no normalization)
+4. **Raw Format**: `DialBegin` events are forwarded in their original AMI format (no normalization). `Hangup` and `BridgeEnter` events are merged when they have the same `linkedid`.
 
 ## Webhook Payload Format
 
-All webhooks are sent as POST requests with the original AMI event format. The service forwards the raw event data with minimal modifications:
+### DialBegin Events
+
+`DialBegin` events are sent as POST requests with the original AMI event format (no merging):
 
 ```json
 {
@@ -208,15 +233,79 @@ All webhooks are sent as POST requests with the original AMI event format. The s
   "Destination": "SIP/1002-00000002",
   "Context": "from-internal",
   "Exten": "1002",
-  "Priority": "1"
+  "Priority": "1",
+  "timestamp": "2024-01-15T10:30:00.000+07:00"
 }
 ```
+
+### Merged Hangup & BridgeEnter Events
+
+For outbound calls, `Hangup` and `BridgeEnter` events with the same `linkedid` are automatically merged into a single webhook payload:
+
+```json
+{
+  "event": "Hangup",
+  "privilege": "call,all",
+  "linkedid": "1769163211.30169",
+  "cause": "16",
+  "cause_txt": "Normal Clearing",
+  "timestamp": "2026-01-23T17:13:51.430+07:00",
+  "channels": [
+    {
+      "channel": "SIP/VNPT-0000255a",
+      "calleridnum": "0938146818",
+      "calleridname": "CID:02439369558",
+      "connectedlinenum": "02439369558",
+      "connectedlinename": "",
+      "context": "from-trunk",
+      "uniqueid": "1769163216.30180"
+    },
+    {
+      "channel": "SIP/244-00002559",
+      "calleridnum": "244",
+      "calleridname": "Cloudgo",
+      "connectedlinenum": "244",
+      "connectedlinename": "Cloudgo",
+      "context": "from-internal",
+      "uniqueid": "1769163212.30171"
+    }
+  ],
+  "caller": {
+    "channel": "SIP/244-00002559",
+    "calleridnum": "244",
+    "calleridname": "Cloudgo",
+    "context": "from-internal",
+    "uniqueid": "1769163212.30171"
+  },
+  "callee": {
+    "channel": "SIP/VNPT-0000255a",
+    "calleridnum": "0938146818",
+    "calleridname": "CID:02439369558",
+    "context": "from-trunk",
+    "uniqueid": "1769163216.30180"
+  },
+  "hotline": {
+    "number": "02439369558",
+    "name": ""
+  }
+}
+```
+
+**Merged Event Fields:**
+- `channels`: Array of both channel information (extension and trunk)
+- `caller`: Caller information (extension/internal channel with context `from-internal`)
+  - `calleridnum`: Extension number (e.g., "244")
+- `callee`: Callee information (external/trunk channel with context `from-trunk`)
+  - `calleridnum`: External phone number (e.g., "0938146818")
+- `hotline`: Hotline number displayed to the callee
+  - `number`: Hotline number from `connectedlinenum` of trunk channel (e.g., "02439369558")
 
 **Note**: 
 - The `incomingData` field is automatically removed from all events
 - A `timestamp` field is automatically added to each event in Asia/Ho_Chi_Minh timezone (UTC+7) format: `2024-01-15T10:30:00.000+07:00`
-- Events are forwarded in their original AMI format (no normalization)
-- Only `DialBegin`, `BridgeEnter`, and `Hangup` events are processed
+- `DialBegin` events are forwarded in their original AMI format (no normalization)
+- `Hangup` and `BridgeEnter` events are merged when they have the same `linkedid` (typically for outbound calls)
+- If a matching event is not found within 2 seconds, the single event is sent as-is
 
 ### Event Examples
 
@@ -240,8 +329,54 @@ Triggered when a call starts ringing.
 }
 ```
 
-#### `BridgeEnter`
-Triggered when a call is answered (bridged).
+#### `BridgeEnter` (Merged for Outbound Calls)
+Triggered when a call is answered (bridged). For outbound calls, this event is merged with the matching event from the trunk channel.
+
+**Merged Format (Outbound Call):**
+```json
+{
+  "event": "BridgeEnter",
+  "privilege": "call,all",
+  "linkedid": "1769163211.30169",
+  "timestamp": "2026-01-23T17:13:05.000+07:00",
+  "channels": [
+    {
+      "channel": "SIP/244-00002559",
+      "calleridnum": "244",
+      "calleridname": "Cloudgo",
+      "context": "from-internal",
+      "uniqueid": "1769163212.30171"
+    },
+    {
+      "channel": "SIP/VNPT-0000255a",
+      "calleridnum": "0938146818",
+      "calleridname": "CID:02439369558",
+      "context": "from-trunk",
+      "uniqueid": "1769163216.30180"
+    }
+  ],
+  "caller": {
+    "channel": "SIP/244-00002559",
+    "calleridnum": "244",
+    "calleridname": "Cloudgo",
+    "context": "from-internal",
+    "uniqueid": "1769163212.30171"
+  },
+  "callee": {
+    "channel": "SIP/VNPT-0000255a",
+    "calleridnum": "0938146818",
+    "calleridname": "CID:02439369558",
+    "context": "from-trunk",
+    "uniqueid": "1769163216.30180"
+  },
+  "hotline": {
+    "number": "02439369558",
+    "name": ""
+  }
+}
+```
+
+**Single Event Format (if no match found within 2 seconds):**
 ```json
 {
   "Event": "BridgeEnter",
@@ -257,8 +392,57 @@ Triggered when a call is answered (bridged).
 }
 ```
 
-#### `Hangup`
-Triggered when a call ends.
+#### `Hangup` (Merged for Outbound Calls)
+Triggered when a call ends. For outbound calls, this event is merged with the matching event from the trunk channel.
+
+**Merged Format (Outbound Call):**
+```json
+{
+  "event": "Hangup",
+  "privilege": "call,all",
+  "linkedid": "1769163211.30169",
+  "cause": "16",
+  "cause_txt": "Normal Clearing",
+  "timestamp": "2026-01-23T17:13:51.430+07:00",
+  "channels": [
+    {
+      "channel": "SIP/244-00002559",
+      "calleridnum": "244",
+      "calleridname": "Cloudgo",
+      "context": "from-internal",
+      "uniqueid": "1769163212.30171"
+    },
+    {
+      "channel": "SIP/VNPT-0000255a",
+      "calleridnum": "0938146818",
+      "calleridname": "CID:02439369558",
+      "connectedlinenum": "02439369558",
+      "context": "from-trunk",
+      "uniqueid": "1769163216.30180"
+    }
+  ],
+  "caller": {
+    "channel": "SIP/244-00002559",
+    "calleridnum": "244",
+    "calleridname": "Cloudgo",
+    "context": "from-internal",
+    "uniqueid": "1769163212.30171"
+  },
+  "callee": {
+    "channel": "SIP/VNPT-0000255a",
+    "calleridnum": "0938146818",
+    "calleridname": "CID:02439369558",
+    "context": "from-trunk",
+    "uniqueid": "1769163216.30180"
+  },
+  "hotline": {
+    "number": "02439369558",
+    "name": ""
+  }
+}
+```
+
+**Single Event Format (if no match found within 2 seconds):**
 ```json
 {
   "Event": "Hangup",
@@ -275,7 +459,10 @@ Triggered when a call ends.
 ```
 
 **Important Notes:**
-- All events are forwarded in their **original AMI format** (no normalization)
+- `DialBegin` events are forwarded in their **original AMI format** (no normalization, no merging)
+- `Hangup` and `BridgeEnter` events are **automatically merged** when they have the same `linkedid` (typically for outbound calls)
+- The merged events include `caller`, `callee`, `hotline`, and `channels` fields for complete call information
+- If a matching event is not found within 2 seconds, the single event is sent as-is
 - The `incomingData` field is **automatically removed** from all events
 - A `timestamp` field is **automatically added** to each event (Asia/Ho_Chi_Minh timezone, UTC+7)
 - Events with channels starting with `Local/` or `Macro/` are **automatically filtered out**
